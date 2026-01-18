@@ -1,3 +1,5 @@
+# TODO s:
+# 1. Check shapes for loss functions
 """
 [Enter title here]
 Reinforcement Learning Jargon:
@@ -365,10 +367,11 @@ class PPOLoss(nn.Module):
     Entropy Bonus, and a KL divergence regularizer.
 
     The total loss is as follows (light on notation on purpose):
-        L = 1.0 * L_CLIP(probability ratio, advantage)
-            + value_c * L_VALUE(value, accumulated discounted reward)
-            + entropy_c * Entropy_Bonus(action_dist)
-            + kl_coeff * KL_DIV(probability ratio)
+        PPOLoss = 
+            1.0       * L_CLIP(probability ratio, advantage)+
+            value_c   * L_VALUE(value, accumulated discounted reward) +
+            entropy_c * Entropy_Bonus(action_dist) +
+            kl_coeff  * KL_DIV(probability ratio)
 
     KL_DIV is Kullback–Leibler divergence (https://en.wikipedia.org/wiki/Kullback%E2%80%93Leibler_divergence) and
     essentially is another regularizing term for the loss. It works similarly to the Clip Surrogated Objective Loss
@@ -379,7 +382,6 @@ class PPOLoss(nn.Module):
         value_c (float): Coefficient for the value function loss term.
         entropy_c (float): Coefficient for the entropy bonus term.
         kl_coeff (float): Coefficient for the KL regularizer term.
-        *args, **kwargs: Passed to nn.Module.
     """
 
     def __init__(self, eps, value_c,entropy_c, kl_coeff, *args, **kwargs):
@@ -392,8 +394,30 @@ class PPOLoss(nn.Module):
         self.kl_coeff = kl_coeff
         
     
-    def forward(self ,adv , Rt,V,actions, actions_dist , old_logprob):
+    def forward(self ,adv , Rt, V, actions, actions_dist , old_logprob):
+        """
+        Compute the PPO loss.
 
+        Args:
+            adv (torch.Tensor):     The advantages.
+                                    Shape: (num_envs * (num_steps//num_minibatches),)
+            Rt (torch.Tensor):      The accumlated discounted reward tensor.
+                                    Shape: (num_envs * (num_steps//num_minibatches),)
+            V (torch.Tensor):       The value function output from the critic.
+                                    Shape: (num_envs * (num_steps//num_minibatches),)
+            actions (torch.Tensor): Actions taken by the agent.
+                                    Shape: (num_envs * (num_steps//num_minibatches), action_dim)  (continuous)
+                                           (num_envs * (num_steps//num_minibatches),)             (discrete)
+
+            actions_dist (torch.distributions.Distribution): The action distribution output from the actor.
+                                                            Batch shape: (num_envs * (num_steps//num_minibatches),)
+                                                            Event shape: (action_dim,) (continuous) or () (discrete)
+
+            old_logprob (torch.Tensor):                     Log-probabilities of the sampled actions under the old policy.
+                                                            Shape: (num_envs * (num_steps//num_minibatches),)
+
+        Note: num_steps//num_minibatches = number of steps per rollout.
+        """
         new_log_prob = actions_dist.log_prob(actions)
         log_ratio = new_log_prob - old_logprob
         ratio = torch.exp(log_ratio)
