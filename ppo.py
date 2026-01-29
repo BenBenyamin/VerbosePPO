@@ -8,19 +8,22 @@ Reinforcement Learning Jargon:
 θ   : The policy weights / parameters.
 a   : The action.
 s   : The state
-𝔼(x): The mean of x (practically).
-Rt  : Accumlated discounted reward (starting from time t)
+𝔼(x): The expected value of x. Practically the mean of x.
+Gt  : The return, Accumlated discounted reward (starting from time t)
+      
+      Gt = Σ γ^k *r_{t+k+1)
+      where k ∈ ℕ,  k ∈ [0, ∞)
 
 [The value function , V]
 The value is the expected accumlated discounted reward given a given state s:
-    V(s) = 𝔼(R|s) = 𝔼(Σ(γ^k *r | s)) 
+    V(s) = 𝔼(G|s) = 𝔼(Σ(γ^k *r | s)) 
     γ = discount factor for future rewards.
 
 [The Q-value function,Q]
 
 The Q value is the expected accumlated discounted reward of taking a specific action a give state s.
 
-Q(s,a) = 𝔼(Rt|s,a)
+Q(s,a) = 𝔼(Gt|s,a)
 
 [Difference between Q and V]
 
@@ -212,7 +215,7 @@ class ActorCritic(nn.Module):
             # π_θ is action_dist.
             # In the log case, it will be Σ log(π_θ(a_i | s)).
 
-            action_dist = D.Independent(D.Normal(actor_out, std), 1)
+            action_dist = D.Independent(D.Normal(actor_out, std), 1) # 1 corresponds here to sum over dim=-1, the action dim.
         else:
 
             # In the discrete case, the output needs to be converted to logits.
@@ -296,10 +299,10 @@ class ValueFunctionLoss(nn.Module):
     """
     The Value Function Loss in PPO is the loss term regarding the critic; it ensures that the critic
     is performing its job correctly evaluating the value of the current state. It is defined as the mean squared error
-    between the calculated value, V, and the accumulated discounted rewards, Rt which represent
+    between the calculated value, V, and the accumulated discounted rewards, Gt which represent
     the true value of the state. 
 
-    L_VALUE = -0.5 *  mean((V - Rt)^2) * coeff
+    L_VALUE = -0.5 *  mean((V - Gt)^2) * coeff
 
     Args:
     coeff (float): The multiplier for the value loss in the PPO loss.
@@ -311,13 +314,13 @@ class ValueFunctionLoss(nn.Module):
         super().__init__()
         self.coeff = coeff
 
-    def forward(self,Rt,V):
+    def forward(self,Gt,V):
 
         """
         Calculate the Value Function Loss.
         
         Args:
-        Rt (torch.tensor): The accumlated discounted reward tensor. 
+        Gt (torch.tensor): The accumlated discounted reward tensor. 
                            Shape: (num_envs * num_steps//num_minibatches,)
         V  (torch.tensor): The value function output from the critic.
                            Shape: (num_envs * num_steps//num_minibatches,)
@@ -325,7 +328,7 @@ class ValueFunctionLoss(nn.Module):
         Note: num_steps//num_minibatches = number of steps per rollout.
         """
 
-        return self.coeff * 0.5 * torch.pow(V - Rt,2).mean()
+        return self.coeff * 0.5 * torch.pow(V - Gt,2).mean()
 
 class EntropyBonus(nn.Module):
 
@@ -394,14 +397,14 @@ class PPOLoss(nn.Module):
         self.kl_coeff = kl_coeff
         
     
-    def forward(self ,adv , Rt, V, actions, actions_dist , old_logprob):
+    def forward(self ,adv , Gt, V, actions, actions_dist , old_logprob):
         """
         Compute the PPO loss.
 
         Args:
             adv (torch.Tensor):     The advantages.
                                     Shape: (num_envs * (num_steps//num_minibatches),)
-            Rt (torch.Tensor):      The accumlated discounted reward tensor.
+            Gt (torch.Tensor):      The accumlated discounted reward tensor.
                                     Shape: (num_envs * (num_steps//num_minibatches),)
             V (torch.Tensor):       The value function output from the critic.
                                     Shape: (num_envs * (num_steps//num_minibatches),)
@@ -452,7 +455,7 @@ class PPOLoss(nn.Module):
         kl = ((log_ratio.exp() - 1) - log_ratio).mean()
 
         clip_loss = self.clip_loss(ratio,adv)
-        value_loss = self.value_loss(Rt,V)
+        value_loss = self.value_loss(Gt,V)
         ent_bonus = self.ent_bonus(actions_dist)
         loss = clip_loss + value_loss + ent_bonus + self.kl_coeff * kl
 
@@ -665,7 +668,7 @@ class PPOTrainer:
             
             loss , kl = self.loss_func(
                 adv=mb_advantages,
-                Rt=mb_returns,
+                Gt=mb_returns,
                 V=new_values,
                 actions=mb_actions,
                 actions_dist=new_actions_dist,
