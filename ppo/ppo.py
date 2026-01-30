@@ -73,16 +73,16 @@ class ActorCritic(nn.Module):
             → [value]        (1)
 
     Args:
-    state_dim (int): Dimension of the input observation.
-    action_dim (int): Dimension of the output action.
-    hidden_size (int): The size of the hidden layer. Default is 64 (taken from cleanRL)
-    actor (nn.Module, optional): Optional custom actor network. If None then the one from cleanRL is used.
-    continuous (bool, optional): Does the environment have continuous actions. Defaults to False.
-    init_weights(bool, optional): Whether to weight initialization or not. Defaults to True.
-    actor_std (float, optional): Standard deviation for continuous actor distribution. Defaults to 0.01.
-    critic_std (float, optional): Initialization scale for critic output layers. Defaults to 1.0.
-    hidden_std (float, optional): Initialization scale for hidden layers. Defaults to √2.
-    bias_const (float, optional): Constant value to initialize network biases with. Defaults to 0.0.
+        state_dim (int): Dimension of the input observation.
+        action_dim (int): Dimension of the output action.
+        hidden_size (int): The size of the hidden layer. Default is 64 (taken from cleanRL)
+        actor (nn.Module, optional): Optional custom actor network. If None then the one from cleanRL is used.
+        continuous (bool, optional): Does the environment have continuous actions. Defaults to False.
+        init_weights(bool, optional): Whether to weight initialization or not. Defaults to True.
+        actor_std (float, optional): Standard deviation for continuous actor distribution. Defaults to 0.01.
+        critic_std (float, optional): Initialization scale for critic output layers. Defaults to 1.0.
+        hidden_std (float, optional): Initialization scale for hidden layers. Defaults to √2.
+        bias_const (float, optional): Constant value to initialize network biases with. Defaults to 0.0.
     """
     def __init__(
                 self,
@@ -161,11 +161,10 @@ class ActorCritic(nn.Module):
         as the activation function; thus, so does this implementation.
 
         Args:
-
-        actor_std (float, optional): Standard deviation for continuous actor distribution. Defaults to 0.01.
-        critic_std (float, optional): Initialization scale for critic output layers. Defaults to 1.0.
-        hidden_std (float, optional): Initialization scale for hidden layers. Defaults to √2.
-        bias_const (float, optional): Constant value to initialize network biases with. Defaults to 0.0.
+            actor_std (float, optional): Standard deviation for continuous actor distribution. Defaults to 0.01.
+            critic_std (float, optional): Initialization scale for critic output layers. Defaults to 1.0.
+            hidden_std (float, optional): Initialization scale for hidden layers. Defaults to √2.
+            bias_const (float, optional): Constant value to initialize network biases with. Defaults to 0.0.
         """
 
         actor_linear_layers = [layer for layer in self.actor.modules() if isinstance(layer, nn.Linear)]
@@ -264,7 +263,7 @@ class ClipSurrogatedObjectiveLoss(nn.Module):
 
     Args:
 
-    eps (float): The clipping threshold , ε.
+        eps (float): The clipping threshold , ε.
     """
     
     def __init__(
@@ -281,13 +280,13 @@ class ClipSurrogatedObjectiveLoss(nn.Module):
 
         Args:
 
-        ratio (torch.tensor): The ratio tensor between the old policy and the new one. 
-                              Shape: (num_envs * num_steps//num_minibatches,)
-                              ratio = π_θ(a | s) / π_θ_old(a | s)
-        
-        adv (torch.tensor): The advantage tensor. Shape: (num_envs * num_steps//num_minibatches,)
+            ratio (torch.tensor): The ratio tensor between the old policy and the new one. 
+                                Shape: (num_envs * num_steps//num_minibatches,)
+                                ratio = π_θ(a | s) / π_θ_old(a | s)
+            
+            adv (torch.tensor): The advantage tensor. Shape: (num_envs * num_steps//num_minibatches,)
 
-        Note: num_steps//num_minibatches = number of steps per rollout.
+            Note: num_steps//num_minibatches = number of steps per rollout.
         """
 
         return -1.0*torch.min(
@@ -320,12 +319,12 @@ class ValueFunctionLoss(nn.Module):
         Calculate the Value Function Loss.
         
         Args:
-        Gt (torch.tensor): The accumlated discounted reward tensor. 
-                           Shape: (num_envs * num_steps//num_minibatches,)
-        V  (torch.tensor): The value function output from the critic.
-                           Shape: (num_envs * num_steps//num_minibatches,)
+            Gt (torch.tensor): The accumlated discounted reward tensor. 
+                            Shape: (num_envs * num_steps//num_minibatches,)
+            V  (torch.tensor): The value function output from the critic.
+                            Shape: (num_envs * num_steps//num_minibatches,)
 
-        Note: num_steps//num_minibatches = number of steps per rollout.
+            Note: num_steps//num_minibatches = number of steps per rollout.
         """
 
         return self.coeff * 0.5 * torch.pow(V - Gt,2).mean()
@@ -345,7 +344,7 @@ class EntropyBonus(nn.Module):
     loss = -self.coeff* entropy
 
     Args:
-    coeff (float): Multiplier for the entropy bonus term in the PPO loss.
+        coeff (float): Multiplier for the entropy bonus term in the PPO loss.
     """
 
     def __init__(self, coeff):
@@ -370,12 +369,13 @@ class PPOLoss(nn.Module):
     Entropy Bonus, and a KL divergence regularizer.
 
     The total loss is as follows (light on notation on purpose):
+    
         PPOLoss = 
             1.0       * L_CLIP(probability ratio, advantage)+
             value_c   * L_VALUE(value, accumulated discounted reward) +
             entropy_c * Entropy_Bonus(action_dist) +
             kl_coeff  * KL_DIV(probability ratio)
-
+    
     KL_DIV is Kullback–Leibler divergence (https://en.wikipedia.org/wiki/Kullback%E2%80%93Leibler_divergence) and
     essentially is another regularizing term for the loss. It works similarly to the Clip Surrogated Objective Loss
     by punishing big changes in the policy.
@@ -465,10 +465,62 @@ class GeneralizedAdvantageEstimation(nn.Module):
     """
     Generalized Advantage Estimation (GAE) , is a way to estimate the advantage 
     (how much is an action better for the given state) given the rewards and values.
-    The value, V(s) = 𝔼[G|s] = 𝔼[Σ(γ^k *r_{t+k+1) | s)] = 𝔼[r_{t+1} + Σ(γ^{k+1}*r_{t+k+2}| s)]
-    = 𝔼[r_{t+1} | s] + γ*𝔼[Σγ^k *r_{t+k+2} | s] = 𝔼[r_{t+1} | s] + γ*𝔼[G_{t+1} | s] = 𝔼[r_{t+1} + γ*V(s_{t+1} | s])
-    (Why 𝔼[G_{t+1} | s] = 𝔼[V(s_{t+1} | s]? see https://github.com/BenBenyamin/Dejargonize/blob/main/ppo/images/4.png)
-    = 𝔼[r_{t+1}  + γ*V(s_{t+1}) | s]
+    https://arxiv.org/pdf/1506.02438#page=5 , eq. 16
+
+    At ~=  Σ(γλ)^l *δ_{t+1} 
+
+    Where l = 0 -> num_steps
+    δ_t is the Temporal Difference (TD). It means the one time step difference between 
+    value estimates at step t+1 and t.
+    δ_t = r_t + γ V(s_{t+1}) − V(s_t)
+    
+    Explanation:
+    The Q value,
+    Q(s,a) = 𝔼[G|s, a]
+           = 𝔼[Σ(γ^k *r_{t+k+1) | s, a)]
+           = 𝔼[r_{t+1} + Σ(γ^{k+1}*r_{t+k+2}| s, a)]
+           = 𝔼[r_{t+1} | s, a] + γ*𝔼[Σγ^k *r_{t+k+2} | s, a]
+           = 𝔼[r_{t+1} | s, a] + γ*𝔼[G_{t+1} | s, a]
+           = 𝔼[r_{t+1} | s, a] + γ𝔼[V(s_{t+1}) | s, a]
+           = 𝔼[r_{t+1}  + γ*V(s_{t+1}) | s, a]
+
+    
+    Why 𝔼[G_{t+1} | s ,a] = 𝔼[V(s_{t+1} | s,a] ? 
+    See    https://github.com/BenBenyamin/Dejargonize/blob/main/ppo/images/1.png
+
+    Thus, 
+    A(s,a) = Q(s,a) - V(s) 
+           = 𝔼[r_{t+1} + γ*V(s_{t+1}) | s, a] - V(s_t) 
+           = 𝔼[r_{t+1} + γ*V(s_{t+1})  - V(s_t) | s,a]
+           = 𝔼[δ_t | s,a]
+           This means that the A(s,a) is the expected value of the TD, δ_t given
+           action a and state s. (Also eq. 10 in the original paper, https://arxiv.org/pdf/1506.02438#page=4)
+    
+    Define: Â_{t,k} := Σγ^l *δ_{t+l} 
+            Where l = 0 -> k -1
+            For example:
+            Â_{t,0} = δ_t
+            Â_{t,1} = δ_t + γ*δ_{t+1}
+            Â_{t,2} = δ_t + γ*δ_{t+1} + γ^2*δ_{t+2}
+            and in general: 
+            Â_{t,n+1} = Â_{t,n} + γ^n*δ_{t+n}
+
+    Note that:
+            Â_{t,∞} = Σ γ^k *r_{t+k+1) - V(s) (Eq 15 : https://arxiv.org/pdf/1506.02438#page=4)
+                    = G_t - V(s)
+            Thus 𝔼[Â_{t,∞}] = 𝔼[G_t | s,a] - V(s) = Q(s,a) - V(s) = A(s,a)
+
+    Therfore GAE is defined as
+    GAE := Σ(γλ)^l *δ_{t+1}
+    Where l = 0 -> ∞
+    In practice: l = 0 -> num_steps
+    Where γ is the discount factor for future rewards.
+    and   λ is the decay parameter / GAE λ / eligibility trace parameter
+
+    Args:
+        gamma (float, optional) - γ , the discount factor for future rewards.
+        lam (float, optional) - λ, the GAE decay parameter.
+
     """
     def __init__(self, gamma=0.99, lam=0.95):
         super().__init__()
