@@ -8,22 +8,22 @@ Reinforcement Learning Jargon:
 θ   : The policy weights / parameters.
 a   : The action.
 s   : The state
-𝔼(x): The expected value of x. Practically the mean of x.
+𝔼[x]: The expected value of x. Practically the mean of x.
 Gt  : The return, Accumlated discounted reward (starting from time t)
       
       Gt = Σ γ^k *r_{t+k+1)
-      where k ∈ ℕ,  k ∈ [0, ∞)
+      where k = 0 -> ∞ , k ∈ ℕ
 
 [The value function , V]
 The value is the expected accumlated discounted reward given a given state s:
-    V(s) = 𝔼(G|s) = 𝔼(Σ(γ^k *r | s)) 
+    V(s) = 𝔼[G|s] = 𝔼[(]Σ(γ^k *r | s))]
     γ = discount factor for future rewards.
 
 [The Q-value function,Q]
 
 The Q value is the expected accumlated discounted reward of taking a specific action a give state s.
 
-Q(s,a) = 𝔼(Gt|s,a)
+Q(s,a) = 𝔼[Gt|s,a] = 𝔼[Σ(γ^k *r | s , a)] 
 
 [Difference between Q and V]
 
@@ -462,6 +462,14 @@ class PPOLoss(nn.Module):
         return  loss, kl
 
 class GeneralizedAdvantageEstimation(nn.Module):
+    """
+    Generalized Advantage Estimation (GAE) , is a way to estimate the advantage 
+    (how much is an action better for the given state) given the rewards and values.
+    The value, V(s) = 𝔼[G|s] = 𝔼[Σ(γ^k *r_{t+k+1) | s)] = 𝔼[r_{t+1} + Σ(γ^{k+1}*r_{t+k+2}| s)]
+    = 𝔼[r_{t+1} | s] + γ*𝔼[Σγ^k *r_{t+k+2} | s] = 𝔼[r_{t+1} | s] + γ*𝔼[G_{t+1} | s] = 𝔼[r_{t+1} + γ*V(s_{t+1} | s])
+    (Why 𝔼[G_{t+1} | s] = 𝔼[V(s_{t+1} | s]? see https://github.com/BenBenyamin/Dejargonize/blob/main/ppo/images/4.png)
+    = 𝔼[r_{t+1}  + γ*V(s_{t+1}) | s]
+    """
     def __init__(self, gamma=0.99, lam=0.95):
         super().__init__()
         self.gamma = gamma
