@@ -467,32 +467,31 @@ class GeneralizedAdvantageEstimation(nn.Module):
     (how much is an action better for the given state) given the rewards and values.
     https://arxiv.org/pdf/1506.02438#page=5 , eq. 16
 
-    At ~=  Σ(γλ)^l *δ_{t+1} 
-
+    At ~=  Σ(γλ)^l *δ_{t+l} 
     Where l = 0 -> num_steps
+
     δ_t is the Temporal Difference (TD). It means the one time step difference between 
     value estimates at step t+1 and t.
     δ_t = r_t + γ V(s_{t+1}) − V(s_t)
     
     Explanation:
     The Q value,
-    Q(s,a) = 𝔼[G|s, a]
-           = 𝔼[Σ(γ^k *r_{t+k+1) | s, a)]
-           = 𝔼[r_{t+1} + Σ(γ^{k+1}*r_{t+k+2}| s, a)]
-           = 𝔼[r_{t+1} | s, a] + γ*𝔼[Σγ^k *r_{t+k+2} | s, a]
-           = 𝔼[r_{t+1} | s, a] + γ*𝔼[G_{t+1} | s, a]
-           = 𝔼[r_{t+1} | s, a] + γ𝔼[V(s_{t+1}) | s, a]
-           = 𝔼[r_{t+1}  + γ*V(s_{t+1}) | s, a]
-
+    Q(s,a) = 𝔼[G | s, a]
+           = 𝔼[Σ(γ^k * r_{t+k} | s, a)]
+           = 𝔼[r_t + Σ(γ^{k+1} * r_{t+k+1} | s, a)]
+           = 𝔼[r_t | s, a] + γ * 𝔼[Σ γ^k * r_{t+k+1} | s, a]
+           = 𝔼[r_t | s, a] + γ * 𝔼[G_t | s, a] 
+           = 𝔼[r_t | s, a] + γ * 𝔼[V(s_{t+1}) | s, a](*)
+           = 𝔼[r_t + γ * V(s_{t+1}) | s, a]
     
-    Why 𝔼[G_{t+1} | s ,a] = 𝔼[V(s_{t+1} | s,a] ? 
+    (*) Why 𝔼[G_t | s ,a] = 𝔼[V(s_t) | s,a] ? 
     See    https://github.com/BenBenyamin/Dejargonize/blob/main/ppo/images/1.png
 
     Thus, 
     A(s,a) = Q(s,a) - V(s) 
-           = 𝔼[r_{t+1} + γ*V(s_{t+1}) | s, a] - V(s_t) 
-           = 𝔼[r_{t+1} + γ*V(s_{t+1})  - V(s_t) | s,a]
-           = 𝔼[δ_t | s,a]
+           = 𝔼[r_t + γ * V(s_{t+1}) | s, a] - V(s_t)
+           = 𝔼[r_t + γ * V(s_{t+1}) - V(s_t) | s, a]
+           = 𝔼[δ_t | s, a]
            This means that the A(s,a) is the expected value of the TD, δ_t given
            action a and state s. (Also eq. 10 in the original paper, https://arxiv.org/pdf/1506.02438#page=4)
     
@@ -505,21 +504,39 @@ class GeneralizedAdvantageEstimation(nn.Module):
             and in general: 
             Â_{t,n+1} = Â_{t,n} + γ^n*δ_{t+n}
 
+
     Note that:
-            Â_{t,∞} = Σ γ^k *r_{t+k+1) - V(s) (Eq 15 : https://arxiv.org/pdf/1506.02438#page=4)
+            Â_{t,∞} = Σ γ^k *r_{t+l} - V(s) (Eq 15 : https://arxiv.org/pdf/1506.02438#page=4)
                     = G_t - V(s)
             Thus 𝔼[Â_{t,∞}] = 𝔼[G_t | s,a] - V(s) = Q(s,a) - V(s) = A(s,a)
 
     Therfore GAE is defined as
-    GAE := Σ(γλ)^l *δ_{t+1}
+    GAE := Σ(γλ)^l *δ_{t+l}
     Where l = 0 -> ∞
     In practice: l = 0 -> num_steps
-    Where γ is the discount factor for future rewards.
-    and   λ is the decay parameter / GAE λ / eligibility trace parameter
+    Where γ ∈ [0,1] is the discount factor for future rewards. 
+    γ = 0 : prioritize immediate rewards; γ = 1 : Treat future rewards equally.
+
+    and   λ ∈ [0,1] is the decay parameter / GAE λ / eligibility trace parameter.
+    small λ : advantages are short-sighted → high bias , low variance. 
+    It is biased because there is a systematic error, due to "short-sightedness".
+    Variance is low because less step rewards are used.
+    
+    large λ : advantages include many rewards far in the future → noisy → high variance low bias.
+    Simillarly, has low bias because it includes many future rewards and better captures long-term effects. 
+    Variance is high because summing many stochastic rewards makes the estimate noisy. 
+
+    Note: 
+    The time complexity for the forward-sum computation is O(num_steps^2). 
+    Equivalently, using backward recursion:
+    Â_t = δ_t + γ * λ * Â_{t+1}
+    This runs in O(num_steps), but requires initializing 
+    Â_{num_steps} := 0 as the base case for the recursion. 
+    An extra value V_{num_steps} is also needed to compute δ at the last timestep.
 
     Args:
-        gamma (float, optional) - γ , the discount factor for future rewards.
-        lam (float, optional) - λ, the GAE decay parameter.
+        gamma (float, optional): γ , the discount factor for future rewards. Defaults to 0.99.
+        lam (float, optional): λ, the GAE decay parameter. Defaults to 0.95.
 
     """
     def __init__(self, gamma=0.99, lam=0.95):
@@ -529,24 +546,36 @@ class GeneralizedAdvantageEstimation(nn.Module):
 
     def forward(self, rewards, values, dones, norm=True):
         """
-        rewards: [T]
-        values:  [T+1]  (bootstrap value for last state included)
-        dones:   [T]
+        Compute Generalized Advantage Estimation (GAE).
+
+
+        Args:
+            rewards (torch.Tensor): Tensor of rewards at each timestep.
+                Shape: (num_steps, num_envs)
+            values (torch.Tensor): Tensor of value estimates for each state, including bootstrap for last state.
+                Shape: (num_steps + 1, num_envs)
+            dones (torch.Tensor): Tensor indicating episode termination (1 if done, 0 otherwise).
+                Shape: (num_steps, num_envs)
+            norm (bool, optional): If True, normalize the advantages to have mean 0 and std 1. Default: True.
+
+        Returns:
+            torch.Tensor: Tensor of advantage estimates.
+                Shape: (num_steps, num_envs)
         """
 
         if values.dim() == 3 and values.shape[-1] == 1:
             values = values.squeeze(-1)
 
         if len(rewards.shape) == 1:
-            T = rewards.shape[0]
-            N = 1
+            num_steps = rewards.shape[0]
+            num_envs = 1
         else:
-            T, N = rewards.shape
+            num_steps, num_envs = rewards.shape
 
-        advantages = torch.zeros((T, N), device=rewards.device, dtype=rewards.dtype)
-        last_gae = torch.zeros(N, device=rewards.device, dtype=rewards.dtype)
+        advantages = torch.zeros((num_steps, num_envs), device=rewards.device, dtype=rewards.dtype)
+        last_gae = torch.zeros(num_envs, device=rewards.device, dtype=rewards.dtype)
 
-        for t in reversed(range(T)):
+        for t in reversed(range(num_steps)):
             next_nonterminal = 1.0 - dones[t].float()
             delta = rewards[t] + self.gamma * values[t + 1] * next_nonterminal - values[t]
             advantages[t]  = delta + self.gamma * self.lam * next_nonterminal * last_gae
