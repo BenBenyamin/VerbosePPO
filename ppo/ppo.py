@@ -467,11 +467,12 @@ class GeneralizedAdvantageEstimation(nn.Module):
     (how much is an action better for the given state) given the rewards and values.
     https://arxiv.org/pdf/1506.02438#page=5 , eq. 16
 
-    At ~=  Σ(γλ)^l *δ_{t+l} 
+    At ≈  Σ(γλ)^l *δ_{t+l} 
     Where l = 0 -> num_steps
 
-    δ_t is the Temporal Difference (TD). It means the one time step difference between 
-    value estimates at step t+1 and t.
+    δ_t is the Temporal Difference (TD). It means how much the reward 
+    plus the next value differs from the current value estimate.
+
     δ_t = r_t + γ V(s_{t+1}) − V(s_t)
     
     Explanation:
@@ -481,11 +482,13 @@ class GeneralizedAdvantageEstimation(nn.Module):
            = 𝔼[r_t + Σ(γ^{k+1} * r_{t+k+1} | s, a)]
            = 𝔼[r_t | s, a] + γ * 𝔼[Σ γ^k * r_{t+k+1} | s, a]
            = 𝔼[r_t | s, a] + γ * 𝔼[G_t | s, a] 
-           = 𝔼[r_t | s, a] + γ * 𝔼[V(s_{t+1}) | s, a](*)
-           = 𝔼[r_t + γ * V(s_{t+1}) | s, a]
+           = 𝔼[r_t | s, a] + γ * 𝔼[V(s_{t+1}) | s, a] (*)
+           = 𝔼[r_t + γ * V(s_{t+1}) | s, a] (**)
     
     (*) Why 𝔼[G_t | s ,a] = 𝔼[V(s_t) | s,a] ? 
     See    https://github.com/BenBenyamin/Dejargonize/blob/main/ppo/images/1.png
+    (**) Simillarly, V(s) = 𝔼[G | s] = 𝔼[r_t + γ * V(s_{t+1}) | s] 
+    (https://web.stanford.edu/class/psych209/Readings/SuttonBartoIPRLBook2ndEd.pdf#page=158 , eq. 6.3-4)
 
     Thus, 
     A(s,a) = Q(s,a) - V(s) 
@@ -503,7 +506,6 @@ class GeneralizedAdvantageEstimation(nn.Module):
             Â_{t,2} = δ_t + γ*δ_{t+1} + γ^2*δ_{t+2}
             and in general: 
             Â_{t,n+1} = Â_{t,n} + γ^n*δ_{t+n}
-
 
     Note that:
             Â_{t,∞} = Σ γ^k *r_{t+l} - V(s) (Eq 15 : https://arxiv.org/pdf/1506.02438#page=4)
@@ -561,11 +563,15 @@ class GeneralizedAdvantageEstimation(nn.Module):
         Returns:
             torch.Tensor: Tensor of advantage estimates.
                 Shape: (num_steps, num_envs)
+            torch.Tensor: Tensor of returns estimates.
+                Shape: (num_steps, num_envs)
         """
 
+        # Remove trailing singleton dimension from critic value outputs if needed
         if values.dim() == 3 and values.shape[-1] == 1:
             values = values.squeeze(-1)
 
+        # Check if it is a single / vector environment
         if len(rewards.shape) == 1:
             num_steps = rewards.shape[0]
             num_envs = 1
@@ -575,15 +581,28 @@ class GeneralizedAdvantageEstimation(nn.Module):
         advantages = torch.zeros((num_steps, num_envs), device=rewards.device, dtype=rewards.dtype)
         last_gae = torch.zeros(num_envs, device=rewards.device, dtype=rewards.dtype)
 
+        # Do the recursive backward sum
         for t in reversed(range(num_steps)):
+            # If the episode ended at step t, values[t+1] belongs to the next episode
+            #  and is therefore not meaningful.
             next_nonterminal = 1.0 - dones[t].float()
+            # δ_t = r_t + γ V(s_{t+1})*next_nonterminal − V(s_t)
+            # next_nonterminal is there to zero out values not from the same episode.
             delta = rewards[t] + self.gamma * values[t + 1] * next_nonterminal - values[t]
+            # Â_t = δ_t + γ * λ * Â_{t+1}*next_nonterminal
             advantages[t]  = delta + self.gamma * self.lam * next_nonterminal * last_gae
             last_gae = advantages[t]
     
+        # Q(s,a) = E[G_t | s,a], the expected return from taking action a in state s.
+        # Since we cannot compute the expectation over all possible next states and rewards,
+        # we approximate Q(s,a) with a sampled estimate of G_t.
+        # By definition, A(s,a) = Q(s,a) - V(s), so equivalently:
+        # G_t ≈ Q(s,a) ≈ A(s,a) + V(s)
+        returns = advantages + values[:-1] # [:-1] because we need to un-bootstrap
 
-        returns = advantages + values[:-1]
-
+        # Rewards can be very sparse, delayed, or have spikes.
+        # Normalizing advantages prevents unusually large or small advantage values from 
+        # destabilizing the policy updates, making learning smoother and more reliable.
         if norm:
             advantages = (advantages - advantages.mean()) / (advantages.std() + 1e-8)
 
