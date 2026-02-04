@@ -901,7 +901,40 @@ class PPOTrainer:
                 self.update(rewards , values, dones, obs_tensor ,actions_tensor , old_logprob)
 
 class PPO:
+    """
+    A Wrapper class to encompass the PPO pipeline: Defining the policy, training, perdicting ,.. 
+    Wrapper class that wires together the PPO pipeline.
+    Builds an Actor-Critic policy network from the environment, handles rollouts, GAE, and PPO updates. 
+    Exposes a single entry point for training and inference.
+    
+    Args:
+            env (gymnasium.Env | stable_baselines3.common.vec_env.VecEnv): The environment instance to train on (single or vectorized).
+            device: The device on which training will run. Default: "cpu".
+            actor (nn.Module, optional): Optional custom actor network. If None then the one from cleanRL is used.
+                                         Default : None.
+            hidden_size (int): The size of the hidden layer for the actor critic network. Default: 64.
+            num_steps (int, optional): Number of steps to collect per update. Default: 2048.
+            gamma (float, optional): Discount factor for future rewards. Default: 0.99.
+            gae_lambda (float, optional): Lambda parameter for Generalized Advantage Estimation (GAE). Default: 0.95.
+            num_minibatches (int, optional): Number of minibatches to split the rollout into for each update. Default: 4.
+            update_epochs (int, optional): Number of epochs to update the policy per rollout. Default: 4.
+            norm_adv (bool, optional): Whether to normalize the advantages to mean 0 and std 1. Default: True.
+            clip_coef (float, optional): PPO clipping coefficient for policy updates. Default: 0.2.
+            vf_coef (float, optional): Coefficient for value function loss. Default: 0.5.
+            ent_coef (float, optional): Coefficient for entropy bonus to encourage exploration. Default: 0.01.
+            kl_coeff (float, optional): Coefficient for KL divergence penalty (if used). Default: 0.02.
+            max_grad_norm (float, optional): Maximum gradient norm for clipping. Default: 0.5.
+            target_kl (float, optional): Target KL divergence threshold for early stopping of policy updates. 
+                                        If None, no early stopping based on KL is applied. Default: None.
+            learning_rate (float, optional): Learning rate for the optimizer. Default: 2.5e-4.
+            anneal_lr (bool, optional): Whether to linearly anneal the learning rate during training. Default: True.
+            actor_std (float, optional): Standard deviation for continuous actor distribution. Defaults to 0.01.
+            init_weights(bool, optional): Whether to weight initialization or not. Default: True.
+            critic_std (float, optional): Initialization scale for critic output layers. Defaults to 1.0.
+            hidden_std (float, optional): Initialization scale for hidden layers. Defaults to √2.
+            bias_const (float, optional): Constant value to initialize network biases with. Defaults to 0.0.
 
+    """
     def __init__(
         self,
         env,
@@ -922,7 +955,6 @@ class PPO:
         target_kl=None,
         learning_rate=2.5e-4,
         anneal_lr=True,
-        continuous:bool=False,
         actor_std:float=0.01,
         init_weights:bool= True,
         critic_std:float=1.0,
@@ -981,12 +1013,36 @@ class PPO:
         )
 
     def learn(self, total_timesteps):
+        """
+        Trains the PPO agent for a given number of environment timesteps by delegating to PPOTrainer.train().
 
+        Args:
+            total_timesteps (int): Total number of environment timesteps to train for.
+
+        Returns self to allow chaining (e.g., model.learn(...).save(...)).
+        """
         self.trainer.train(total_timesteps)
         return self
 
     def predict(self, obs, deterministic=True):
+        """
+        Computes an action from the current policy given an observation.
 
+        For continuous action spaces, deterministic mode returns the distribution mean.
+        For discrete action spaces, deterministic mode returns the argmax action.
+        If deterministic is False, actions are sampled from the policy distribution.
+
+        Args:
+            obs (torch.Tensor | np.array): Observation(s) to act on.
+                Shape: (batch_size, obs_dim).
+            deterministic (bool): If True, use mean/argmax action. If False, sample from the policy.
+
+        Returns:
+            np.ndarray: Action(s) as a numpy array on the CPU.
+                Shape:
+                    Discrete: (batch,)
+                    Continuous: (batch_size, action_dim)
+        """
         if not torch.is_tensor(obs):
             obs = torch.tensor(obs, dtype=torch.float32, device=self.device)
         else:
@@ -1009,7 +1065,19 @@ class PPO:
         return action.cpu().numpy()
 
     def save(self, path):
+        """
+        Saves the policy to disk.
+
+        Args:
+            path (str): File path to save the policy weights to.
+        """
         torch.save(self.policy.state_dict(), path)
 
     def load(self, path):
+        """
+        Loads policy parameters from disk into the current policy.
+
+        Args:
+            path (str): File path to load the policy weights from.
+        """
         self.policy.load_state_dict(torch.load(path))
