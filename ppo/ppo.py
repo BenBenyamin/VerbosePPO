@@ -402,22 +402,22 @@ class PPOLoss(nn.Module):
         Compute the PPO loss.
 
         Args:
-            adv (torch.Tensor):     The advantages.
-                                    Shape: (num_envs * (num_steps//num_minibatches),)
-            Gt (torch.Tensor):      The accumlated discounted reward tensor.
-                                    Shape: (num_envs * (num_steps//num_minibatches),)
-            V (torch.Tensor):       The value function output from the critic.
-                                    Shape: (num_envs * (num_steps//num_minibatches),)
+            adv (torch.Tensor): The advantages.
+                Shape: (num_envs * (num_steps//num_minibatches),)
+            Gt (torch.Tensor): The accumlated discounted reward tensor.
+                Shape: (num_envs * (num_steps//num_minibatches),)
+            V (torch.Tensor): The value function output from the critic.
+                Shape: (num_envs * (num_steps//num_minibatches),)
             actions (torch.Tensor): Actions taken by the agent.
-                                    Shape: (num_envs * (num_steps//num_minibatches), action_dim)  (continuous)
-                                           (num_envs * (num_steps//num_minibatches),)             (discrete)
+                Shape: (num_envs * (num_steps//num_minibatches), action_dim)  (continuous)
+                       (num_envs * (num_steps//num_minibatches),)             (discrete)
 
             actions_dist (torch.distributions.Distribution): The action distribution output from the actor.
-                                                            Batch shape: (num_envs * (num_steps//num_minibatches),)
-                                                            Event shape: (action_dim,) (continuous) or () (discrete)
+                Batch shape: (num_envs * (num_steps//num_minibatches),)
+                Event shape: (action_dim,) (continuous) or () (discrete)
 
-            old_logprob (torch.Tensor):                     Log-probabilities of the sampled actions under the old policy.
-                                                            Shape: (num_envs * (num_steps//num_minibatches),)
+            old_logprob (torch.Tensor): Log-probabilities of the sampled actions under the old policy.
+                Shape: (num_envs * (num_steps//num_minibatches),)
 
         Note: num_steps//num_minibatches = number of steps per rollout.
         """
@@ -481,7 +481,7 @@ class GeneralizedAdvantageEstimation(nn.Module):
            = 𝔼[Σ(γ^k * r_{t+k} | s, a)]
            = 𝔼[r_t + Σ(γ^{k+1} * r_{t+k+1} | s, a)]
            = 𝔼[r_t | s, a] + γ * 𝔼[Σ γ^k * r_{t+k+1} | s, a]
-           = 𝔼[r_t | s, a] + γ * 𝔼[G_t | s, a] 
+           = 𝔼[r_t | s, a] + γ * 𝔼[G_{t+1} | s, a] 
            = 𝔼[r_t | s, a] + γ * 𝔼[V(s_{t+1}) | s, a] (*)
            = 𝔼[r_t + γ * V(s_{t+1}) | s, a] (**)
     
@@ -529,10 +529,10 @@ class GeneralizedAdvantageEstimation(nn.Module):
     Variance is high because summing many stochastic rewards makes the estimate noisy. 
 
     Note: 
-    The time complexity for the forward-sum computation is O(num_steps^2). 
+    The time complexity for the forward-sum computation is Θ(num_steps^2). 
     Equivalently, using backward recursion:
     Â_t = δ_t + γ * λ * Â_{t+1}
-    This runs in O(num_steps), but requires initializing 
+    This runs in Θ(num_steps), but requires initializing
     Â_{num_steps} := 0 as the base case for the recursion. 
     An extra value V_{num_steps} is also needed to compute δ at the last timestep.
 
@@ -586,14 +586,14 @@ class GeneralizedAdvantageEstimation(nn.Module):
             # If the episode ended at step t, values[t+1] belongs to the next episode
             #  and is therefore not meaningful.
             next_nonterminal = 1.0 - dones[t].float()
-            # δ_t = r_t + γ V(s_{t+1})*next_nonterminal − V(s_t)
+            # δ_t = r_t + γ V(s_{t+1})*next_nonterminal - V(s_t)
             # next_nonterminal is there to zero out values not from the same episode.
             delta = rewards[t] + self.gamma * values[t + 1] * next_nonterminal - values[t]
             # Â_t = δ_t + γ * λ * Â_{t+1}*next_nonterminal
             advantages[t]  = delta + self.gamma * self.lam * next_nonterminal * last_gae
             last_gae = advantages[t]
     
-        # Q(s,a) = E[G_t | s,a], the expected return from taking action a in state s.
+        # Q(s,a) = 𝔼[G_t | s,a], the expected return from taking action a in state s.
         # Since we cannot compute the expectation over all possible next states and rewards,
         # we approximate Q(s,a) with a sampled estimate of G_t.
         # By definition, A(s,a) = Q(s,a) - V(s), so equivalently:
@@ -629,9 +629,39 @@ class PPOTrainer:
         learning_rate: float = 2.5e-4,
         anneal_lr: bool = True,
     ):
+        """
+        Handles the full PPO training loop: collects rollouts 
+        from the environment, computes Generalized Advantage Estimates (GAE), 
+        and updates the policy and value networks using minibatch stochastic
+        gradient descent with the PPO clipped objective.
+
+        Supports single and vectorized environments, continuous and discrete action spaces.
+        Default values taken from CleanRL.
+
+        Args:
+            policy (ActorCritic): The actor-critic model containing the policy and value networks.
+            env (gymnasium.Env | stable_baselines3.common.vec_env.VecEnv): The environment instance to train on (single or vectorized).
+            num_steps (int, optional): Number of steps to collect per update. Default: 2048.
+            gamma (float, optional): Discount factor for future rewards. Default: 0.99.
+            gae_lambda (float, optional): Lambda parameter for Generalized Advantage Estimation (GAE). Default: 0.95.
+            num_minibatches (int, optional): Number of minibatches to split the rollout into for each update. Default: 4.
+            update_epochs (int, optional): Number of epochs to update the policy per rollout. Default: 4.
+            norm_adv (bool, optional): Whether to normalize the advantages to mean 0 and std 1. Default: True.
+            clip_coef (float, optional): PPO clipping coefficient for policy updates. Default: 0.2.
+            vf_coef (float, optional): Coefficient for value function loss. Default: 0.5.
+            ent_coef (float, optional): Coefficient for entropy bonus to encourage exploration. Default: 0.01.
+            kl_coeff (float, optional): Coefficient for KL divergence penalty (if used). Default: 0.02.
+            max_grad_norm (float, optional): Maximum gradient norm for clipping. Default: 0.5.
+            target_kl (float, optional): Target KL divergence threshold for early stopping of policy updates. 
+                                        If None, no early stopping based on KL is applied. Default: None.
+            learning_rate (float, optional): Learning rate for the optimizer. Default: 2.5e-4.
+            anneal_lr (bool, optional): Whether to linearly anneal the learning rate during training. Default: True.
+        """
+
         
         self.policy = policy
         self.env = env
+        # Check if vectorized or not
         self.num_envs = getattr(env, "num_envs", 1)
         self.is_vec = hasattr(env, "num_envs")
         self.obs_space = env.observation_space
@@ -663,20 +693,39 @@ class PPOTrainer:
         self.learning_rate = learning_rate
         self.anneal_lr = anneal_lr
 
-        self.num_timesteps = 0
+        self.num_timesteps = 0 # How many timesteps in total where processed
 
         self.optimizer = torch.optim.AdamW(
             self.policy.parameters(),
             lr=self.learning_rate,
+            ## Weight decay is just L2 regularization, 
+            # which can hurt exploration for R, thus is set to 0.
             weight_decay=0.0,
             
         )
 
         self.anneal_lr = anneal_lr
             
-    def rollout(
-            self,
-        ):
+    def rollout(self):
+        """
+        Rollout for on-policy PPO training.
+        Runs the current policy in the environment for `num_steps` and records the transition data
+        needed by `update()` (observations, actions, rewards, done flags, value estimates, and old log-probs).
+
+        Returns:
+            rewards (torch.Tensor): Tensor of rewards at each timestep.
+                Shape: (num_steps, num_envs)
+            values (torch.Tensor): Tensor of value estimates for each state, including bootstrap for last state.
+                Shape: (num_steps + 1, num_envs)
+            dones (torch.Tensor): Tensor indicating episode termination (1 if done, 0 otherwise).
+                Shape: (num_steps, num_envs)
+            obs_tensor (torch.Tensor): Tensor of observations at each timestep.
+                Shape: (num_steps, num_envs)
+            actions_tensor (torch.Tensor): Tensor of action taken by the policy at each timestep.
+                Shape: (num_steps, num_envs)
+            old_logprob (torch.Tensor): Log-probabilities of the sampled actions under the old policy.
+                Shape: (num_steps,num_envs)
+        """
 
         obs = self.env.reset()
         if not self.is_vec:
@@ -694,6 +743,7 @@ class PPOTrainer:
 
             if self.is_vec:
                 # SB3 VecEnv: step() → obs, rewards, dones, infos
+                # Environment runs on the CPU, thus transfer is needed
                 obs , reward, done_vec, infos = self.env.step(actions.cpu().numpy())
 
                 # Extract truncated from info
@@ -730,6 +780,7 @@ class PPOTrainer:
             _, last_value = self.policy(obs_t)
         values.append(last_value.detach())
 
+        # Stack lists into batch tensors
         rewards = torch.stack(rewards).to(self.device)
         values = torch.stack(values).to(self.device)
         dones = torch.stack(dones).to(torch.bool).to(self.device)
@@ -740,9 +791,28 @@ class PPOTrainer:
         return rewards , values, dones, obs_tensor ,actions_tensor , old_logprob
                 
     def update(self , rewards , values, dones, obs_tensor ,actions_tensor , old_logprob):
+        """
+        Updates the policy and critic using the on-policy data collected during the rollout.
+        Shuffles the rollout batch and splits it into minibatches for training.
 
+        Args:
+            rewards (torch.Tensor): Tensor of rewards at each timestep.
+                Shape: (num_steps, num_envs)
+            values (torch.Tensor): Tensor of value estimates for each state, including bootstrap for last state.
+                Shape: (num_steps + 1, num_envs)
+            dones (torch.Tensor): Tensor indicating episode termination (1 if done, 0 otherwise).
+                Shape: (num_steps, num_envs)
+            obs_tensor (torch.Tensor): Tensor of observations at each timestep.
+                Shape: (num_steps, num_envs)
+            actions_tensor (torch.Tensor): Tensor of action taken by the policy at each timestep.
+                Shape: (num_steps, num_envs)
+            old_logprob (torch.Tensor): Log-probabilities of the sampled actions under the old policy.
+                Shape: (num_steps,num_envs)
+        """
+        # Get the advantages and rewards from GAE
         advantages, returns = self.gae(rewards,values,dones,norm = self.norm_adv)
 
+        # Get the random indecies for the minibatch
         batch_size = self.num_steps * self.num_envs
         minibatch_size = batch_size // self.num_minibatches
         indices = torch.randperm(batch_size, device=self.device)
@@ -750,13 +820,15 @@ class PPOTrainer:
         # flatten once per update
         obs_flat = obs_tensor.reshape(batch_size, -1)
 
+        # Flatten the action tensors 
         if self.policy.continuous:
-            actions_flat = actions_tensor.reshape(batch_size, -1)
+            actions_flat = actions_tensor.reshape(batch_size, -1) # new shape: (num_steps*num_envs,action_dim)
         else:
-            actions_flat = actions_tensor.reshape(batch_size) 
+            actions_flat = actions_tensor.reshape(batch_size) # new shape: (num_steps*num_envs,)
+    
         old_logprob_flat = old_logprob.reshape(batch_size)
         advantages_flat = advantages.reshape(batch_size)
-        returns_flat = returns.reshape(batch_size, -1)
+        returns_flat = returns.reshape(batch_size, -1) # Match critic's output shape, (batch_size,1)
 
         for minibatch in range(self.num_minibatches):
 
@@ -774,6 +846,7 @@ class PPOTrainer:
             
             new_actions_dist , new_values = self.policy(mb_obs)
             
+            # Feed it into the loss
             loss , kl = self.loss_func(
                 adv=mb_advantages,
                 Gt=mb_returns,
@@ -783,28 +856,46 @@ class PPOTrainer:
                 old_logprob = mb_old_logprob,
             )
 
+            # Check KL early stopping (if defined)
             if self.target_kl and kl > self.target_kl:
                 break
-
+            
+            # Backprop
             self.optimizer.zero_grad()
             loss.backward()
+            # keep the gradient norm less than self.max_grad_norm
             if self.max_grad_norm:
                 torch.nn.utils.clip_grad_norm_(self.policy.parameters(), self.max_grad_norm)
             self.optimizer.step()
 
     
     def train(self, num_timesteps:int):
+        """
+        The training logic for PPO. First, collects an [on-policy] rollout (everything needed to update the policy),
+        and then updates the policy for multiple epochs over that fixed batch. Also handles linear learning rate
+        annealing/decay over the full training run.
+
+        Notes:
+            The number of time steps is treated as a global timestep budget. 
+            Vectorized environments will share this budget with each other. 
+
+        Args:
+            num_timesteps (int): The aggregate number of environment timesteps to train for.
+        """
 
         while self.num_timesteps < num_timesteps:
-
+            
+            # Linear annealing
             if self.anneal_lr:
                 frac = 1 - (self.num_timesteps / num_timesteps)
                 lr_now = self.learning_rate * frac
                 for g in self.optimizer.param_groups:
                     g["lr"] = lr_now
 
+            # Collects on policy rollout
             rewards , values, dones, obs_tensor ,actions_tensor , old_logprob = self.rollout()
 
+            # Update for how many epochs defined
             for _ in range(self.update_epochs):
 
                 self.update(rewards , values, dones, obs_tensor ,actions_tensor , old_logprob)
@@ -857,18 +948,18 @@ class PPO:
         action_dim = int(action_dim)
 
         self.policy = ActorCritic(
-                                    actor=actor,
-                                    state_dim=obs_dim,
-                                    action_dim=action_dim,
-                                    hidden_size=hidden_size,
-                                    continuous=continuous,
-                                    init_weights=init_weights,
-                                    actor_std=actor_std,
-                                    bias_const=bias_const,
-                                    critic_std=critic_std,
-                                    hidden_std=hidden_std,
+            actor=actor,
+            state_dim=obs_dim,
+            action_dim=action_dim,
+            hidden_size=hidden_size,
+            continuous=continuous,
+            init_weights=init_weights,
+            actor_std=actor_std,
+            bias_const=bias_const,
+            critic_std=critic_std,
+            hidden_std=hidden_std,
 
-                                    ).to(self.device)
+            ).to(self.device)
 
         self.trainer = PPOTrainer(
             policy=self.policy,
