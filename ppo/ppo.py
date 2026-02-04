@@ -1,7 +1,28 @@
 # TODO s:
 # 1. Check shapes for loss functions
 """
-[Enter title here]
+-----------------------------------------------------------
+-----------------------------------------------------------
+      ___                ___              ___     
+     /  /\              /  /\            /  /\    
+    /  /::\            /  /::\          /  /::\   
+   /  /:/\:\          /  /:/\:\        /  /:/\:\  
+  /  /:/~/:/         /  /:/~/:/       /  /:/  \:\ 
+ /__/:/ /:/         /__/:/ /:/       /__/:/ \__\:\
+ \  \:\/:/          \  \:\/:/        \  \:\ /  /:/
+  \  \::/            \  \::/          \  \:\  /:/ 
+   \  \:\             \  \:\           \  \:\/:/  
+    \  \:\             \  \:\           \  \::/   
+     \__\/ ROXIMAL      \__\/ OLICY      \__\/ PTIMIZATION
+
+-----------------------------------------------------------
+Ben Benyamin
+-----------------------------------------------------------
+03/02/2026
+-----------------------------------------------------------
+Version 1 
+-----------------------------------------------------------
+
 Reinforcement Learning Jargon:
 
 π   : The policy.
@@ -40,6 +61,13 @@ A(s,a) = Q(s,a) - V(s)
 
 A > 0 : The action is better than the average.
 A < 0 : The action is worse than the average.
+
+[Temporal Distance Error, δ_t]
+
+The Temporal Difference (TD) error means how much the reward plus the next
+value differs from the current value estimate.
+
+δ_t = r_t + γ V(s_{t+1}) − V(s_t)
 
 """
 import torch
@@ -470,7 +498,7 @@ class GeneralizedAdvantageEstimation(nn.Module):
     At ≈  Σ(γλ)^l *δ_{t+l} 
     Where l = 0 -> num_steps
 
-    δ_t is the Temporal Difference (TD). It means how much the reward 
+    δ_t is the Temporal Difference (TD) error. It means how much the reward 
     plus the next value differs from the current value estimate.
 
     δ_t = r_t + γ V(s_{t+1}) − V(s_t)
