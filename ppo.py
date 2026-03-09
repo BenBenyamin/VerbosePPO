@@ -512,7 +512,7 @@ class GeneralizedAdvantageEstimation(nn.Module):
            = 𝔼[r_t + γ * V(s_{t+1}) | s, a] (**)
     
     (*) Why 𝔼[G_t | s ,a] = 𝔼[V(s_t) | s,a] ? 
-    See    https://github.com/BenBenyamin/Dejargonize/blob/main/ppo/images/1.png
+    See    https://github.com/BenBenyamin/VerbosePPO/blob/main/images/1.png
     (**) Simillarly, V(s) = 𝔼[G | s] = 𝔼[r_t + γ * V(s_{t+1}) | s] 
     (https://web.stanford.edu/class/psych209/Readings/SuttonBartoIPRLBook2ndEd.pdf#page=158 , eq. 6.3-4)
 
